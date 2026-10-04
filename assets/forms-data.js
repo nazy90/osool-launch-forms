@@ -49,6 +49,22 @@
         label: bi('Upload your ID', 'ارفع صورة الهوية'),
         placeholder: bi('Photo or PDF, up to 8 MB', 'صورة أو PDF، بحد أقصى 8 ميجابايت'),
       },
+      {
+        key: 'has_car', type: 'select', width: 'full', required: true,
+        label: bi('Will you enter the site by car?', 'هل ستدخل الموقع بسيارة؟'),
+        options: [opt('yes', 'Yes', 'نعم'), opt('no', 'No', 'لا')],
+      },
+      {
+        key: 'plate_number', type: 'text', width: 'half', required: true,
+        label: bi('Car plate number', 'رقم لوحة السيارة'),
+        showIf: { field: 'has_car', equals: 'yes' },
+      },
+      {
+        key: 'car_type', type: 'text', width: 'half', required: true,
+        label: bi('Car type', 'نوع السيارة'),
+        placeholder: bi('e.g. sedan, van, truck', 'مثال: سيدان، فان، شاحنة'),
+        showIf: { field: 'has_car', equals: 'yes' },
+      },
     ],
     thankYou: bi(
       'Thank you, we have received your details and ID. Production will share the call sheet with you.',

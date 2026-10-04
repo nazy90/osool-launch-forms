@@ -25,6 +25,9 @@ const FORMS = {
       { key: 'mobile', label: 'Mobile', required: true },
       { key: 'email', label: 'Email', required: true },
       { key: 'id_file', label: 'ID file', required: true, file: true },
+      { key: 'has_car', label: 'Car access', required: true },
+      { key: 'plate_number', label: 'Plate number' },
+      { key: 'car_type', label: 'Car type' },
     ],
   },
   guest: {
