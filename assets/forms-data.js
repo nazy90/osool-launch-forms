@@ -5,10 +5,7 @@
   const opt = (value, en, ar) => ({ value, label: bi(en, ar) });
 
   const shared = {
-    accent: '#c8a96b',
     defaultLang: 'ar',
-    clientName: bi('OSOOL', 'أصول'),
-    tagline: bi('Production Registration Portal', 'بوابة التسجيل للإنتاج'),
     title: bi('OSOOL Launch Campaign & Film', 'حملة إطلاق أصول والفيلم'),
     brief: {
       body: bi(
@@ -21,17 +18,17 @@
         { label: bi('Call time', 'وقت الحضور'), value: bi('[TBD]', '[يُحدد لاحقًا]') },
       ],
     },
-    team: [
-      { role: bi('Production Captain', 'الكابتن الإنتاجي'), name: bi('[TBD]', '[يُحدد لاحقًا]'), featured: true },
-      { role: bi('Directing Captain', 'الكابتن الإخراجي'), name: bi('[TBD]', '[يُحدد لاحقًا]'), featured: true },
-      { role: bi('Production Manager', 'مدير الإنتاج'), name: bi('[TBD]', '[يُحدد لاحقًا]') },
-    ],
+    footer: bi('Internal Captains form — OSOOL launch campaign & film', 'نموذج داخلي خاص بكابتنز - حملة إطلاق أصول والفيلم'),
   };
 
   const crew = {
     ...shared,
     kind: 'crew',
-    subtitle: bi('Crew registration', 'تسجيل فريق العمل'),
+    brandtag: 'CREW REGISTRATION',
+    subtitle: bi('Crew registration', 'تسجيل طاقم المشروع'),
+    heading: bi('Crew details', 'بيانات الطاقم'),
+    section: bi('Your details', 'بيانات الفرد'),
+    another: bi('Register another person', 'تسجيل فرد آخر'),
     formIntro: bi(
       'Please fill in your details and upload a clear photo or scan of your ID. We need it for site access permits.',
       'نحتاج منك تعبئة بياناتك ورفع صورة واضحة من هويتك، عشان تصاريح الدخول للموقع.',
@@ -62,7 +59,11 @@
   const guest = {
     ...shared,
     kind: 'guest',
+    brandtag: 'GUEST REGISTRATION',
     subtitle: bi('Guest registration', 'تسجيل الضيوف'),
+    heading: bi('Guest details', 'بيانات الضيف'),
+    section: bi('Your details', 'بياناتك'),
+    another: bi('Register another guest', 'تسجيل ضيف آخر'),
     formIntro: bi(
       'So we can prepare a smooth experience from the moment you arrive, please fill in your access, reception, transport and hospitality details.',
       'عشان نجهّز لك تجربة مرتبة من لحظة الوصول، نحتاج منك تعبئة المعلومات الخاصة بالدخول، الاستقبال، Transportation والضيافة.',

@@ -120,7 +120,12 @@ function appendRow(form, row) {
   const lock = LockService.getScriptLock();
   lock.waitLock(20000);
   try {
-    ensureSheet(form).appendRow(row);
+    const sheet = ensureSheet(form);
+    const target = sheet.getLastRow() + 1;
+    // Format answer cells as plain text BEFORE writing, otherwise Sheets reads
+    // values like "0532414582" as numbers and drops the leading zero.
+    sheet.getRange(target, 2, 1, row.length - 1).setNumberFormat('@');
+    sheet.getRange(target, 1, 1, row.length).setValues([row]);
   } finally {
     lock.releaseLock();
   }

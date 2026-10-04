@@ -1,5 +1,6 @@
-// Renders one bilingual registration form (crew or guest) and posts it to the
-// Google Apps Script web app, which appends a row to the Google Sheet.
+// Renders one bilingual registration form (crew or guest) in the National Day
+// form's single-page layout, and posts it to the Google Apps Script web app,
+// which appends a row to the Google Sheet.
 (function () {
   const MAX_FILE_BYTES = 8 * 1024 * 1024;
   const MAX_IMAGE_EDGE = 2000; // downscale big phone photos before upload
@@ -9,46 +10,47 @@
   const TEL_RE = /^\+?[\d\s()-]+$/;
 
   const COPY = {
-    next: { en: 'Next', ar: 'نكمل' },
-    back: { en: 'Back', ar: 'رجوع' },
-    submit: { en: 'Submit', ar: 'إرسال المعلومات' },
-    sending: { en: 'Sending…', ar: 'جارٍ الإرسال…' },
-    chooseOption: { en: 'Choose an option', ar: 'اختر الخيار المناسب' },
-    aboutProject: { en: 'About the project', ar: 'عن المشروع' },
-    team: { en: 'The team', ar: 'فريق العمل' },
-    chooseFile: { en: 'Choose file or take photo', ar: 'اختر ملف أو صوّر' },
-    replaceFile: { en: 'Replace', ar: 'تغيير' },
+    submit: { en: 'Submit', ar: 'إرسال البيانات' },
+    reset: { en: 'Clear form', ar: 'مسح النموذج' },
+    preparing: { en: 'Preparing…', ar: 'جار التحضير...' },
+    uploading: { en: 'Uploading file…', ar: 'جار رفع المرفق...' },
+    sending: { en: 'Sending…', ar: 'جار الإرسال...' },
+    choose: { en: 'Choose', ar: 'اختر' },
+    fileReady: { en: 'Attached:', ar: 'تم إرفاق:' },
     errRequired: { en: 'This field is required.', ar: 'هذا الحقل مطلوب.' },
     errEmail: { en: 'Enter a valid email.', ar: 'أدخل بريدًا إلكترونيًا صحيحًا.' },
     errTel: { en: 'Enter a valid phone number.', ar: 'أدخل رقم جوال صحيح.' },
     errTooLong: { en: 'This answer is too long.', ar: 'الإجابة طويلة جدًا.' },
     errFileType: { en: 'Upload a photo (JPG, PNG, HEIC) or a PDF.', ar: 'ارفع صورة (JPG أو PNG أو HEIC) أو ملف PDF.' },
-    errFileSize: { en: 'The file is larger than 8 MB.', ar: 'حجم الملف أكبر من 8 ميجابايت.' },
-    submitError: { en: 'We could not send your details. Please check your connection and try again.', ar: 'تعذّر إرسال المعلومات. تأكد من الاتصال وحاول مرة أخرى.' },
+    errFileSize: { en: 'The file is larger than 8 MB. Please compress it or choose a smaller photo.', ar: 'حجم المرفق أكبر من 8 ميجابايت. يرجى ضغط الصورة أو اختيار صورة أصغر.' },
+    errFileRead: { en: 'Could not read the file. Try another one.', ar: 'تعذر قراءة الملف المرفق. جرّب ملفاً آخر.' },
+    fixErrors: { en: 'Please complete the highlighted fields.', ar: 'يرجى إكمال الحقول المحددة.' },
+    errNetwork: { en: 'Could not reach the server. Check your connection and try again.', ar: 'تعذر الاتصال بالخادم. تحقق من الاتصال بالإنترنت وحاول مرة أخرى.' },
+    errScript: { en: 'Your details were not saved. Please tell production (script error).', ar: 'لم يتم حفظ البيانات. يرجى إبلاغ مسؤول النموذج (خطأ في السكربت).' },
+    errSaved: { en: 'Your details were not saved: ', ar: 'لم يتم حفظ البيانات: ' },
     notConfigured: { en: 'This form is not connected yet. Please contact production.', ar: 'النموذج غير مربوط بعد. تواصل مع فريق الإنتاج.' },
+    thanksTitle: { en: 'Thank you', ar: 'شكراً لك' },
+    thanksNote: { en: 'If we need anything else, production will contact you.', ar: 'في حال احتجنا أي توضيح، سيتواصل معك فريق الإنتاج.' },
+    followUs: { en: 'Follow us on Instagram', ar: 'تابعنا على انستا' },
   };
 
   const form = window.OSOOL_FORMS[document.body.dataset.form];
   const scriptUrl = (window.OSOOL_CONFIG || {}).SCRIPT_URL || '';
-  const hasBrief = form.brief.facts.length > 0 || form.team.length > 0 || !!(form.brief.body.en || form.brief.body.ar);
-  const steps = hasBrief ? ['intro', 'brief', 'form', 'done'] : ['intro', 'form', 'done'];
 
   const state = {
     lang: new URLSearchParams(location.search).get('lang') === 'en' ? 'en' : form.defaultLang,
-    step: 0,
     answers: {},
-    files: {}, // key -> { name, mimeType, data (base64), size }
+    files: {}, // key -> { name, mimeType, data (base64) } or { name, error }
     showErrors: false,
     submitting: false,
-    submitError: '',
+    done: false,
   };
 
   const app = document.getElementById('app');
-  document.documentElement.style.setProperty('--accent', form.accent);
-
   const esc = value => String(value).replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
   const pick = text => (text ? text[state.lang] || text[state.lang === 'ar' ? 'en' : 'ar'] || '' : '');
   const t = key => COPY[key][state.lang];
+  const $ = selector => app.querySelector(selector);
 
   // ── Visibility + validation ────────────────────────────────────────────────
   function visibleFields() {
@@ -78,10 +80,39 @@
     return out;
   }
 
+  // Updates shown/hidden fields and error text in place, so typing never loses focus.
+  function refresh() {
+    const visible = new Set(visibleFields().map(field => field.key));
+    const errs = state.showErrors ? errors() : {};
+    for (const field of form.fields) {
+      const wrap = $(`[data-field="${field.key}"]`);
+      wrap.classList.toggle('hidden', !visible.has(field.key));
+      const err = errs[field.key];
+      const errEl = wrap.querySelector('.error');
+      errEl.textContent = err ? t(err) : '';
+      errEl.classList.toggle('hidden', !err);
+      const control = wrap.querySelector('input:not([type=radio]), select, textarea, .choices');
+      control.setAttribute('aria-invalid', String(!!err));
+      if (field.type === 'file') {
+        const file = state.files[field.key];
+        const hint = wrap.querySelector('.hint');
+        hint.textContent = file && file.data ? `${t('fileReady')} ${file.name}` : pick(field.placeholder);
+        hint.classList.toggle('ok', !!(file && file.data));
+      }
+    }
+    if (state.showErrors && !Object.keys(errs).length) setMessage('');
+  }
+
+  function setMessage(text) {
+    const message = $('#formMessage');
+    message.textContent = text;
+    message.className = text ? 'message error' : 'message';
+  }
+
   // ── Files ──────────────────────────────────────────────────────────────────
-  const readAsDataUrl = blob => new Promise((resolve, reject) => {
+  const readAsBase64 = blob => new Promise((resolve, reject) => {
     const reader = new FileReader();
-    reader.onload = () => resolve(reader.result);
+    reader.onload = () => { const result = String(reader.result); resolve(result.slice(result.indexOf(',') + 1)); };
     reader.onerror = () => reject(reader.error);
     reader.readAsDataURL(blob);
   });
@@ -104,14 +135,25 @@
   }
 
   async function onFile(key, file) {
-    if (!file) { delete state.files[key]; render(); return; }
-    const type = file.type || (/\.hei[cf]$/i.test(file.name) ? 'image/heic' : '');
-    if (!FILE_TYPES.includes(type)) { state.files[key] = { name: file.name, error: 'errFileType' }; render(); return; }
-    const ready = await downscale(file);
-    if (ready.size > MAX_FILE_BYTES) { state.files[key] = { name: file.name, error: 'errFileSize' }; render(); return; }
-    const dataUrl = await readAsDataUrl(ready);
-    state.files[key] = { name: ready.name, mimeType: ready.type || type, size: ready.size, data: String(dataUrl).split(',')[1] };
-    render();
+    if (!file) delete state.files[key];
+    else {
+      const type = file.type || (/\.hei[cf]$/i.test(file.name) ? 'image/heic' : '');
+      if (!FILE_TYPES.includes(type)) state.files[key] = { name: file.name, error: 'errFileType' };
+      else {
+        const ready = await downscale(file);
+        if (ready.size > MAX_FILE_BYTES) state.files[key] = { name: file.name, error: 'errFileSize' };
+        else {
+          try {
+            state.files[key] = { name: ready.name, mimeType: ready.type || type, data: await readAsBase64(ready) };
+          } catch {
+            state.files[key] = { name: file.name, error: 'errFileRead' };
+          }
+        }
+      }
+    }
+    // Show file problems right away, even before the first submit attempt.
+    if (state.files[key] && state.files[key].error) state.showErrors = true;
+    refresh();
   }
 
   // ── Submit ─────────────────────────────────────────────────────────────────
@@ -130,176 +172,182 @@
       const option = (field.options || []).find(o => o.value === value);
       answers[field.key] = option ? option.label.en : value;
     }
-    return {
-      form: form.kind,
-      lang: state.lang,
-      answers,
-      files,
-      website: document.getElementById('hp-website')?.value || '', // honeypot
-    };
+    return { form: form.kind, lang: state.lang, answers, files, website: $('#hp-website').value };
   }
 
-  async function next() {
-    const step = steps[state.step];
-    if (step !== 'form') { state.step += 1; render(); window.scrollTo(0, 0); return; }
-
-    const errs = errors();
-    if (Object.keys(errs).length) {
-      state.showErrors = true;
-      render();
-      const first = form.fields.find(field => errs[field.key]);
-      document.getElementById(`field-${first.key}`)?.focus();
-      return;
-    }
-    if (!scriptUrl) { state.submitError = 'notConfigured'; render(); return; }
-
-    state.submitting = true;
-    state.submitError = '';
-    render();
+  async function send(data) {
+    let response;
     try {
       // text/plain keeps this a "simple" request, so Apps Script needs no CORS preflight.
-      const res = await fetch(scriptUrl, { method: 'POST', body: JSON.stringify(payload()) });
-      const body = await res.json();
-      if (!body.ok) throw new Error(body.error || 'Submission rejected');
-      state.step = steps.indexOf('done');
+      response = await fetch(scriptUrl, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(data) });
+    } catch {
+      throw new Error(t('errNetwork'));
+    }
+    let result;
+    try {
+      result = JSON.parse(await response.text());
+    } catch {
+      // An HTML page here means the Apps Script itself failed or is not deployed correctly.
+      throw new Error(t('errScript'));
+    }
+    if (!result.ok) throw new Error(t('errSaved') + (result.error || ''));
+  }
+
+  async function submit() {
+    state.showErrors = true;
+    const errs = errors();
+    refresh();
+    if (Object.keys(errs).length) {
+      setMessage(t('fixErrors'));
+      const first = form.fields.find(field => errs[field.key]);
+      const el = $(`[data-field="${first.key}"]`);
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      el.querySelector('input, select, textarea')?.focus({ preventScroll: true });
+      return;
+    }
+    if (!scriptUrl) { setMessage(t('notConfigured')); return; }
+
+    const button = $('#submitButton');
+    state.submitting = true;
+    button.disabled = true;
+    try {
+      const data = payload();
+      button.textContent = Object.keys(data.files).length ? t('uploading') : t('sending');
+      await send(data);
+      state.done = true;
+      clearAnswers();
+      render();
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      $('#thankYou').focus();
     } catch (error) {
-      console.error('Submission failed:', error);
-      state.submitError = 'submitError';
+      setMessage(error.message);
     } finally {
       state.submitting = false;
-      render();
-      window.scrollTo(0, 0);
+      if (!state.done) { button.disabled = false; button.textContent = t('submit'); }
     }
+  }
+
+  function clearAnswers() {
+    state.answers = {};
+    state.files = {};
+    state.showErrors = false;
   }
 
   // ── Render ─────────────────────────────────────────────────────────────────
-  function control(field, invalid) {
+  function control(field) {
     const id = `field-${field.key}`;
     const value = esc(state.answers[field.key] || '');
-    const placeholder = pick(field.placeholder);
-    const aria = `aria-invalid="${invalid}" ${invalid ? `aria-describedby="${id}-error"` : ''}`;
+    const placeholder = field.type === 'file' ? '' : esc(pick(field.placeholder));
+    const errorId = `aria-describedby="${id}-error"`;
     switch (field.type) {
       case 'textarea':
-        return `<textarea id="${id}" data-key="${field.key}" rows="4" maxlength="${MAX_ANSWER_LENGTH}" placeholder="${esc(placeholder)}" ${aria}>${value}</textarea>`;
+        return `<textarea id="${id}" name="${field.key}" maxlength="${MAX_ANSWER_LENGTH}" placeholder="${placeholder}" ${errorId}>${value}</textarea>`;
       case 'select':
-        return `<select id="${id}" data-key="${field.key}" data-rerender ${aria}>
-          <option value="">${t('chooseOption')}</option>
+        return `<select id="${id}" name="${field.key}" ${errorId}>
+          <option value="">${t('choose')}</option>
           ${field.options.map(o => `<option value="${esc(o.value)}" ${state.answers[field.key] === o.value ? 'selected' : ''}>${esc(pick(o.label))}</option>`).join('')}
         </select>`;
       case 'pills':
-        return `<div id="${id}" class="pills" role="radiogroup" aria-labelledby="${id}-label" ${aria} tabindex="-1">
-          ${field.options.map(o => {
-            const on = state.answers[field.key] === o.value;
-            return `<button type="button" role="radio" aria-checked="${on}" class="pill ${on ? 'on' : ''}" data-pill="${field.key}" data-value="${esc(o.value)}">${esc(pick(o.label))}</button>`;
-          }).join('')}
+        return `<div class="choices" role="radiogroup" aria-labelledby="${id}-label" ${errorId}>
+          ${field.options.map((o, i) => `<label><input type="radio" ${i === 0 ? `id="${id}"` : ''} name="${field.key}" value="${esc(o.value)}" ${state.answers[field.key] === o.value ? 'checked' : ''}> ${esc(pick(o.label))}</label>`).join('')}
         </div>`;
-      case 'file': {
-        const file = state.files[field.key];
-        const ok = file && file.data;
-        return `<label class="file ${ok ? 'has-file' : ''}" for="${id}">
-          <input id="${id}" type="file" data-file="${field.key}" accept="image/*,application/pdf" ${aria}>
-          <span class="file-btn">${ok ? t('replaceFile') : t('chooseFile')}</span>
-          <span class="file-name" dir="auto">${ok ? esc(file.name) : esc(placeholder)}</span>
-        </label>`;
-      }
+      case 'file':
+        return `<input id="${id}" name="${field.key}" type="file" accept="image/*,.pdf,.jpg,.jpeg,.png,.heic,.heif" ${errorId}>
+          <span class="hint" dir="auto"></span>`;
       default: {
         const ltr = field.type === 'tel' || field.type === 'email';
-        return `<input id="${id}" data-key="${field.key}" type="${field.type}" ${ltr ? `dir="ltr" inputmode="${field.type}"` : ''} maxlength="${MAX_ANSWER_LENGTH}" placeholder="${esc(placeholder)}" value="${value}" ${aria}>`;
+        return `<input id="${id}" name="${field.key}" type="${field.type}" ${ltr ? `dir="ltr" inputmode="${field.type}"` : ''} maxlength="${MAX_ANSWER_LENGTH}" placeholder="${placeholder}" value="${value}" ${errorId}>`;
       }
     }
-  }
-
-  function view() {
-    const step = steps[state.step];
-    if (step === 'intro') {
-      return `<section class="center">
-        <h1 class="brand">${esc(pick(form.clientName))}</h1>
-        <span class="rule"></span>
-        <p class="muted lg">${esc(pick(form.tagline))}</p>
-        <h2>${esc(pick(form.title))}</h2>
-        <p class="chip">${esc(pick(form.subtitle))}</p>
-      </section>`;
-    }
-    if (step === 'brief') {
-      const team = [...form.team.filter(m => m.featured), ...form.team.filter(m => !m.featured)];
-      return `<section class="stack">
-        <h1>${esc(pick(form.title))}</h1>
-        ${form.brief.facts.length ? `<div class="facts">${form.brief.facts.map(f => `
-          <div class="card"><span class="label">${esc(pick(f.label))}</span><strong>${esc(pick(f.value))}</strong></div>`).join('')}</div>` : ''}
-        ${pick(form.brief.body) ? `<div class="card accent"><h3>${t('aboutProject')}</h3><p class="muted">${esc(pick(form.brief.body))}</p></div>` : ''}
-        ${team.length ? `<div><h2>${t('team')}</h2><div class="team">${team.map(m => `
-          <div class="card ${m.featured ? 'accent featured' : ''}"><span class="label">${esc(pick(m.role))}</span><strong class="lg">${esc(pick(m.name))}</strong></div>`).join('')}</div></div>` : ''}
-      </section>`;
-    }
-    if (step === 'form') {
-      const errs = state.showErrors ? errors() : {};
-      return `<form id="the-form" class="stack" novalidate>
-        <div>
-          <h1>${esc(pick(form.title))}</h1>
-          <p class="muted">${esc(pick(form.formIntro))}</p>
-        </div>
-        <div class="grid">
-          ${visibleFields().map(field => {
-            const err = errs[field.key];
-            return `<div class="field ${field.width === 'full' ? 'full' : ''}">
-              <label id="field-${field.key}-label" for="field-${field.key}">${esc(pick(field.label))}${field.required ? ' <span class="req">*</span>' : ''}</label>
-              ${control(field, !!err)}
-              ${err ? `<p id="field-${field.key}-error" class="error">${t(err)}</p>` : ''}
-            </div>`;
-          }).join('')}
-        </div>
-        <div class="hp" aria-hidden="true"><label>Website<input id="hp-website" tabindex="-1" autocomplete="off"></label></div>
-        ${state.submitError ? `<p role="alert" class="error">${t(state.submitError)}</p>` : ''}
-      </form>`;
-    }
-    return `<section class="center">
-      <svg class="check" viewBox="0 0 24 24" width="56" height="56" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></svg>
-      <p class="lg">${esc(pick(form.thankYou))}</p>
-    </section>`;
   }
 
   function render() {
-    const step = steps[state.step];
     document.documentElement.lang = state.lang;
     document.documentElement.dir = state.lang === 'ar' ? 'rtl' : 'ltr';
-    document.title = `${pick(form.title)} · ${pick(form.subtitle)}`;
-    const nextLabel = step === 'form' ? (state.submitting ? t('sending') : t('submit')) : t('next');
+    document.title = `${state.lang === 'ar' ? 'كابتنز' : 'Captains'} | ${pick(form.title)} · ${pick(form.subtitle)}`;
+    const logo = state.lang === 'ar' ? 'captains-logo-ar-white.png' : 'captains-logo-white.png';
 
     app.innerHTML = `
-      <div class="panel">
-        <header>
-          <span class="logo">CAPTAINS</span>
-          <div class="dots" aria-hidden="true">${steps.map((_, i) => `<span class="${i === state.step ? 'on' : ''}"></span>`).join('')}</div>
-          <button type="button" class="ghost" id="lang">${state.lang === 'ar' ? 'English' : 'العربية'}</button>
-        </header>
-        <main>${view()}</main>
-        ${step !== 'done' ? `<footer>
-          ${state.step > 0 ? `<button type="button" id="back">${t('back')}</button>` : '<span></span>'}
-          <button type="button" class="primary" id="next" ${state.submitting ? 'disabled' : ''}>${nextLabel}</button>
-        </footer>` : ''}
+      <div class="brandbar">
+        <div class="brand">
+          <img class="logo-image" src="../assets/${logo}" alt="${state.lang === 'ar' ? 'كابتنز' : 'Captains'}">
+          <p class="brandtag">${esc(form.brandtag)}</p>
+        </div>
+        <div class="side">
+          <div class="status"><span class="dot"></span><span>${esc(pick(form.subtitle))}</span></div>
+          <button type="button" class="lang-toggle" id="lang" lang="${state.lang === 'ar' ? 'en' : 'ar'}">${state.lang === 'ar' ? 'English' : 'العربية'}</button>
+        </div>
       </div>
-      <p class="foot">${esc(pick(form.title))}</p>`;
+
+      <section class="hero ${state.done ? 'hidden' : ''}">
+        <h1>${esc(pick(form.heading))}</h1>
+        <p class="subtitle">${esc(pick(form.formIntro))}</p>
+        ${form.brief.facts.length ? `<div class="facts">${form.brief.facts.map(f => `
+          <div class="fact"><span>${esc(pick(f.label))}</span><strong>${esc(pick(f.value))}</strong></div>`).join('')}</div>` : ''}
+        ${pick(form.brief.body) ? `<div class="notice">${esc(pick(form.brief.body))}</div>` : ''}
+      </section>
+
+      <form id="theForm" class="${state.done ? 'hidden' : ''}" novalidate>
+        <h2 class="section-title">${esc(pick(form.section))}</h2>
+        <div class="grid">
+          ${form.fields.map(field => `
+            <div class="field ${field.width === 'full' ? 'full' : ''}" data-field="${field.key}">
+              <label id="field-${field.key}-label" for="field-${field.key}">${esc(pick(field.label))}${field.required ? ' <span class="req">*</span>' : ''}</label>
+              ${control(field)}
+              <p id="field-${field.key}-error" class="error hidden"></p>
+            </div>`).join('')}
+        </div>
+        <div class="hp" aria-hidden="true"><label>Website<input id="hp-website" tabindex="-1" autocomplete="off"></label></div>
+        <div class="actions">
+          <button class="primary" id="submitButton" type="submit">${t('submit')}</button>
+          <button class="secondary" type="reset">${t('reset')}</button>
+        </div>
+        <div id="formMessage" class="message" role="status" aria-live="polite"></div>
+      </form>
+
+      <section class="thanks ${state.done ? 'show' : ''}" id="thankYou" role="status" aria-live="polite" tabindex="-1">
+        <div class="thanks-mark" aria-hidden="true">✓</div>
+        <h2>${t('thanksTitle')}</h2>
+        <p class="thanks-lead">${esc(pick(form.thankYou))}</p>
+        <p class="thanks-note">${t('thanksNote')}</p>
+        <div class="thanks-social">
+          <p>${t('followUs')}</p>
+          <a class="ig-link" href="https://www.instagram.com/captains_film/" target="_blank" rel="noopener noreferrer">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <rect x="2" y="2" width="20" height="20" rx="5" ry="5"></rect>
+              <path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"></path>
+              <line x1="17.5" y1="6.5" x2="17.51" y2="6.5"></line>
+            </svg>
+            <span>@captains_film</span>
+          </a>
+        </div>
+        <div class="again"><button class="secondary" type="button" id="newEntryButton">${esc(pick(form.another))}</button></div>
+      </section>
+
+      <div class="footer">${esc(pick(form.footer))}</div>`;
+    refresh();
   }
 
-  // Event delegation: the DOM is re-rendered, the listeners stay on #app.
+  // Event delegation: the DOM is re-rendered on language change, listeners stay on #app.
   app.addEventListener('click', event => {
     const target = event.target.closest('button');
     if (!target) return;
     if (target.id === 'lang') { state.lang = state.lang === 'ar' ? 'en' : 'ar'; render(); }
-    else if (target.id === 'back') { state.step -= 1; render(); }
-    else if (target.id === 'next') void next();
-    else if (target.dataset.pill) { state.answers[target.dataset.pill] = target.dataset.value; render(); }
+    else if (target.id === 'newEntryButton') { state.done = false; render(); window.scrollTo({ top: 0, behavior: 'smooth' }); }
   });
   app.addEventListener('input', event => {
-    const key = event.target.dataset.key;
-    if (key) state.answers[key] = event.target.value;
+    const el = event.target;
+    if (!el.name || el.type === 'file' || el.type === 'radio') return;
+    state.answers[el.name] = el.value;
+    if (state.showErrors || el.tagName === 'SELECT') refresh();
   });
   app.addEventListener('change', event => {
     const el = event.target;
-    if (el.dataset.file) void onFile(el.dataset.file, el.files[0]);
-    else if (el.hasAttribute('data-rerender')) { state.answers[el.dataset.key] = el.value; render(); }
+    if (el.type === 'file') void onFile(el.name, el.files[0]);
+    else if (el.type === 'radio' || el.tagName === 'SELECT') { state.answers[el.name] = el.value; refresh(); }
   });
-  app.addEventListener('submit', event => { event.preventDefault(); void next(); });
+  app.addEventListener('submit', event => { event.preventDefault(); if (!state.submitting) void submit(); });
+  app.addEventListener('reset', () => { clearAnswers(); setTimeout(() => { refresh(); setMessage(''); }); });
 
   render();
 })();
