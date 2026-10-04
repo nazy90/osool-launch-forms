@@ -26,9 +26,9 @@ Add `?lang=en` to a link to open it in English. Arabic is the default, and both 
 
    Copy the **Web app URL**. It ends in `/exec`.
 5. **Connect the forms.** Paste that URL into `assets/config.js` as `SCRIPT_URL`.
-6. **Publish on GitHub Pages.** Push this folder to a GitHub repo and enable **Settings → Pages**. Your links will be:
-   - `https://<user>.github.io/<repo>/crew/`
-   - `https://<user>.github.io/<repo>/guest/`
+6. **Push.** Commit and push `assets/config.js`. GitHub Pages redeploys in about a minute. The live links are:
+   - Crew: https://nazy90.github.io/osool-launch-forms/crew/
+   - Guest: https://nazy90.github.io/osool-launch-forms/guest/
 
 If you change `Code.gs` later, go to **Deploy → Manage deployments → Edit → Version: New version**. This keeps the same URL.
 
